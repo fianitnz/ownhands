@@ -1,12 +1,12 @@
 # -*- coding: utf-8 -*-
 import socket
 
-socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # параметры для создания TCP-сокета
-socket.bind(('', 8000))  # слушать на всех адресах, на порту 8000. Чтобы создать сервер на порту ниже 8000 нужен рут, но это не труъ.
-socket.listen(1)  # перевести сокет в режим ожидания входящих соединений
+sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)  # параметры для создания TCP-сокета
+sock.bind(('', 8000))  # слушать на всех адресах, на порту 8000. Чтобы создать сервер на порту ниже 1024 нужен рут, но это не труъ.
+sock.listen(1)  # перевести сокет в режим ожидания входящих соединений
 
 while True:
-    conn, addr = socket.accept()  # ожидать установки соединения
+    conn, addr = sock.accept()  # ожидать установки соединения
 
     data = conn.recv(1024).split('\r\n')  # считываем запрос и бьём на строки
     method, url, proto = data[0].split(' ', 2)  # обрабатываем первую строку
