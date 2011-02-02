@@ -55,12 +55,26 @@ class TestHTTP(object):
         eq_(body, 'Hellow, orld!\n')
 
 class TestServer(object):
-    def test_serve(self):
-        server = HTTPServer()
-        client = MockClient(server)
+    def setup(self):
+        self.server = HTTPServer()
+        self.client = MockClient(self.server)
 
-        reply, headers, body = client('/hellow/orld/')
-        eq_(reply, ['HTTP/1.0', '200', 'OK'])
+    def test_404(self):
+        reply, headers, body = self.client('/you/cant/find/me/?yet')
+        eq_(reply, ['HTTP/1.0', '404', 'Not found'])
         eq_(headers['SERVER'], 'OwnHands/0.1')
-        eq_(body, 'Hi there!\n')
+
+    def test_handlers(self):
+        self.server.register(lambda r: r.url.startswith('/hello/'),
+                             lambda r: r.reply(body='hi'))
+
+        reply, headers, body = self.client('/hello/world/')
+        eq_(reply[1], '200')
+        eq_(body, 'hi')
+
+        self.server.register(lambda r: r.method == 'POST',
+                             lambda r: r.reply(body=r.body))
+        reply, headers, body = self.client('/looking/for/a/POST/', 'POST', 'any url')
+        eq_(reply[1], '200')
+        eq_(body, 'any url')
 
