@@ -18,13 +18,13 @@ def parse_http(data):
 
 
 def encode_http(query, body='', **headers):
-    request = " ".join(query)
+    query = " ".join(query)
 
     headers = "\r\n".join("%s: %s" %
         ("-".join(part.title() for part in key.split('_')), value)
         for key, value in sorted(headers.iteritems()))
-    
-    return "\r\n".join((request, headers, '', body) if body else (request, headers, ''))
+
+    return "\r\n".join((query, headers, '', body) if body else (request, headers, ''))
 
 
 class HTTPServer(object):
