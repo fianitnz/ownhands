@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 from nose.tools import eq_
 
-from serve import HTTPServer
+from serve import HTTPServer, parse_http, encode_http
 
 class MockConnection(object):
     def __init__(self, data=''):
@@ -26,29 +26,38 @@ class MockClient(object):
         self.server = server
 
     def __call__(self, url, method="GET", body='', **headers):
-        # Первая строка - запрос
-        request = "%s %s HTTP/1.0" % (method, url)
+        conn = MockConnection(encode_http((method, url, "HTTP/1.0"), body, **headers))
+        self.server.on_connect(conn, None)
+        return parse_http(conn.sent)
 
-        # Дефолтные заголовки 
-        headers.setdefault('host', 'localhost')
-        headers.setdefault('user_agent', 'MockClient/0.1')
-        headers.setdefault('connection', 'close')
+class TestHTTP(object):
+    def test_request(self):
+        eq_(encode_http(('GET', '/', 'HTTP/1.0'), user_agent="test/shmest"),
+            'GET / HTTP/1.0\r\nUser-Agent: test/shmest\r\n')
 
-        # Приводим заголовки к красивому Http-Виду
-        headers = "\r\n".join("%s: %s" %
-            ("-".join(part.title() for part in key.split('_')), value)
-            for key, value in sorted(headers.iteritems()))
+        eq_(encode_http(('POST', '/', 'HTTP/1.0'), 'post=body', user_agent="test/shmest"),
+            'POST / HTTP/1.0\r\nUser-Agent: test/shmest\r\n\r\npost=body')
+
+        eq_(parse_http('POST / HTTP/1.0\r\nUser-Agent: test/shmest\r\n\r\npost=body'),
+            (['POST', '/', 'HTTP/1.0'], {'USER-AGENT': 'test/shmest'}, 'post=body'))
+
+    def test_response(self):
+        data = 'HTTP/1.0 200 OK\r\nSpam: eggs\r\nTest-Me: please\r\n\r\nHellow, orld!\n'
+
+        eq_(data, encode_http(('HTTP/1.0', '200', 'OK'), 'Hellow, orld!\n', test_me='please', spam="eggs"))
         
-        # Собираем всё в кучу^W HTTP-запрос
-        data = "\r\n".join((request, headers, ''))
-        data += body
+        reply, headers, body = parse_http(data)
+        eq_(reply, ['HTTP/1.0', '200', 'OK'])
+        eq_(headers, {'TEST-ME': 'please', 'SPAM': 'eggs'})
+        eq_(body, 'Hellow, orld!\n')
 
-        # Заворачиваем в соединение и пускаем в обработку
-        return self.server.on_connect(MockConnection(data), None)
-
-class TestHttp(object):
+class TestServer(object):
     def test_serve(self):
         server = HTTPServer()
         client = MockClient(server)
-        client('/hellow/orld/')
+
+        reply, headers, body = client('/hellow/orld/')
+        eq_(reply, ['HTTP/1.0', '200', 'OK'])
+        eq_(headers['SERVER'], 'OwnHands/0.1')
+        eq_(body, 'Hi there!\n')
 
