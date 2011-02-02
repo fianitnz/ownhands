@@ -25,13 +25,21 @@ def parse_http(data):
 
 
 def encode_http(query, body='', **headers):
-    query = " ".join(query)
+    data = [" ".join(query)]
 
     headers = "\r\n".join("%s: %s" %
         ("-".join(part.title() for part in key.split('_')), value)
         for key, value in sorted(headers.iteritems()))
-    
-    return "\r\n".join((query, headers, '', body) if body else (query, headers, ''))</code>
+
+    if headers:
+        data.append(headers)
+
+    data.append('')
+
+    if body:
+        data.append(body)
+
+    return "\r\n".join(data)</code>
 
 Прежде чем менять актуальный и уже рабочий код, сделаем простенькие тесты конкретно для этого элемента. Они будут лежать в своём отдельном контейнере:
 <code lang='python'>class TestHTTP(object):
@@ -190,7 +198,9 @@ request.reply('404', 'Not found', 'Письмо самурай получил\n�
 Как и обещалось, проверять можно не только урл, но и всё, что доступно в запросе:
 <code lang='python'>self.server.register(lambda r: r.method == 'POST',    # отлавливать все посты
                      lambda r: r.reply(body=r.body))  # зеркалим тело запроса
+
 reply, headers, body = self.client('/looking/for/a/POST/', 'POST', 'any url') # отправляем
-eq_(reply[1], '200') # всё порядке
+eq_(reply[1], '200') # всё в порядке
 eq_(body, 'any url') # ловим то, что отправили</code>
 
+Вот теперь всё готово к реализации модулей, описаных в <a href="http://welinux.ru/post/5043/">первой части</a>.
