@@ -1,0 +1,106 @@
+В <a href="http://welinux.ru/post/5047">предыдущей части</a> мы сделали инстурменты для тестирования серверного кода без участия сокетов. Но это получился самый тривиальный из видов тестов ­— <a href="http://ru.wikipedia.org/wiki/Smoke_test">Smoke Test</a>. Сервер запрос обработал, но что именно произошло остаётся загадкой.
+
+Как мы помним из кода, липовое соединение содержит в себе буфер отправленного, в котором оказывается ответ сервера. Можно было бы его сравнить с эталонной строкой, но каждый раз её составлять неудобно и муторно. Поэтому неплохо было бы его распарсить.
+
+Но один раз у нас уже кто-то что-то парсит, а именно — сервер, при получении запроса от клиента. Внимательно <a href="http://upload.wikimedia.org/wikipedia/commons/c/c6/Http_request_telnet_ubuntu.png">посмотрев</a> на траффик можно обнаружить, что протокол практически симметричен. И клиент и сервер обмениваются «сообщениями», состоящими из одних и тех же элементов: строка запроса или ответа (формат одинаковый, немного отличается содержимое), заголовки (формат одинаковый) и тело (необязательное для клиента при GET и для сервера при всяких <a href="http://ru.wikipedia.org/wiki/%D0%A1%D0%BF%D0%B8%D1%81%D0%BE%D0%BA_%D0%BA%D0%BE%D0%B4%D0%BE%D0%B2_%D1%81%D0%BE%D1%81%D1%82%D0%BE%D1%8F%D0%BD%D0%B8%D1%8F_HTTP">хитрых статусах</a>).
+
+В то же время, наш тестовый клиент уже содержит генератор запросов, преобразующий аргументы функции согласно протоколу.
+[cut]
+Вынесем эти две части как из клиента, так и из сервера:
+<code lang='python'>
+def parse_http(data):
+    lines = data.split('\r\n')
+    query = lines[0].split(' ')
+
+    headers = {}
+    for pos, line in enumerate(lines[1:]):
+        if not line.strip():
+            break
+        key, value = line.split(': ', 1)
+        headers[key.upper()] = value
+
+    body = '\r\n'.join(lines[pos+2:])
+
+    return query, headers, body
+
+
+def encode_http(query, body='', **headers):
+    query = " ".join(query)
+
+    headers = "\r\n".join("%s: %s" %
+        ("-".join(part.title() for part in key.split('_')), value)
+        for key, value in sorted(headers.iteritems()))
+    
+    return "\r\n".join((query, headers, '', body) if body else (query, headers, ''))</code>
+
+Прежде чем менять актуальный и уже рабочий код, сделаем простенькие тесты конкретно для этого элемента. Они будут лежать в своём отдельном контейнере:
+<code lang='python'>class TestHTTP(object):
+    def test_request(self):
+        """тестирование в режиме запроса: клиент сериализует, сервер разбирает"""
+        eq_('', encode_http(('GET', '/', 'HTTP/1.0'), user_agent="test/shmest"))
+        eq_('', encode_http(('POST', '/', 'HTTP/1.0'), 'post=body', user_agent="test/shmest"))
+        eq_((), parse_http('POST / HTTP/1.0\r\nUser-Agent: test/shmest\r\n\r\npost=body'))
+
+    def test_response(self):
+        """тестирование в режиме ответа: сервер сериализует, клиент разбирает"""
+        data = 'HTTP/1.0 200 OK\r\nSpam: eggs\r\nTest-Me: please\r\n\r\nHellow, orld!\n'
+
+        eq_(data, encode_http(('HTTP/1.0', '200', 'OK'), 'Hellow, orld!\n', test_me='please', spam="eggs"))
+
+        reply, headers, body = parse_http(data)
+        eq_(reply, [])
+        eq_(headers, {})
+        eq_(body, '')
+</code>
+Это обычные <b>заготовки</b> тестов, которые при запуске будут фейлиться и сообщать, что получено не то, что ожидалось:
+<code lang='python'>AssertionError: 'GET / HTTP/1.0\r\nUser-Agent: test/shmest\r\n' != ''</code>
+
+Убедившись «на глаз», что на выходе получается ровно то, что там должно быть согласно входным данным, копипастим (вдумчиво и внимательно!) значения в тесты.
+
+Теперь, когда мы уверены, что всё работает, можно убрать дублирующийся код из клиента и сервера, а заодно добавить функционала.
+
+Сервер сворачивается в один вызов parse и один encode и теперь готов к дальнейшему расширению без лишних усилий на ручное де/кодирование ответов:
+<code lang='python'>def on_connect(self, conn, addr):
+    """Соединение установлено, вычитываем запрос"""
+    (method, url, proto), headers, body = parse_http(conn.recv(1024))
+    self.on_request(method, url, headers, body, conn)
+
+def on_request(self, method, url, headers, body, conn):
+    """Обработка запроса"""
+    print method, url, repr(body)
+    conn.send(encode_http(("HTTP/1.0", "200", "OK"), "Hi there!\n", server="OwnHands/0.1"))
+    conn.close()</code>
+
+Тест-клиент делает тоже самое, только в обратном порядке:
+<code lang='python'>def __call__(self, url, method="GET", body='', **headers):
+    conn = MockConnection(encode_http((method, url, "HTTP/1.0"), body, **headers))
+    self.server.on_connect(conn, None)
+    return parse_http(conn.sent)</code>
+
+<quote>Для новичков в питоне сразу поясню, что за странные «**» в сигнатуре функции и последующем вызове.<spoiler>Это вовсе не указатель на указатель, как могли бы подумать бывалые сишники, а словарь необязательных именованых аргументов. Что это значит можно быстро проверить в интерпретаторе. Сначала набросаем несколько тривиальных функций:
+<code lang='python'>def spam(kwargs):
+    print kwargs
+
+def eggs(**kwargs):
+    print kwargs</code>
+Попробуйте передать им {'whatever': "yeah"} и whatever="yeah" и посмотреть что будет лежать в переменных.
+
+При вызове функции ситуация ровно обратная. spam({'sausage': 'bacon'}) пройдёт как и ожидалось, а eggs потребует «развёртывания словаря» - eggs(**{'salad': 'cheese'})
+
+В общем рекомендую поиграться созданием и вызовом функций и почитать <a href="http://habrahabr.ru/blogs/python/50381/">что-нибудь</a> на эту тему.</spoiler></quote>
+
+Теперь, пнув сервер в лабораторных условиях, мы можем точно узнать его реакцию, дописав соответствующий тест:
+<code lang='python'>server = HTTPServer()
+client = MockClient(server)
+
+reply, headers, body = client('/hellow/orld/')
+eq_(reply, [])
+eq_(headers['SERVER'], '')
+eq_(body, '')</code>
+
+Уже заполненые тесты <a href="https://code.google.com/p/ownhands/source/browse/03/tests.py?spec=svn483933998485644990048763c59e3c3bbc0d5a7b&r=483933998485644990048763c59e3c3bbc0d5a7b">лежат на гуглькоде</a>, но я считаю, что намного полезней и интересней поиграться и изучить всё это самим.
+
+Заодно обратите внимание, что в отчёте nosetests функции, имеющие строки документации теперь отображаются в человечьем виде вместо «ехал <s>гитлер</s>^W тест через тест…»:
+<code lang='bash'>Тестирование в режиме запроса: клиент сериализует, сервер разбирает ... ok
+Тестирование в режиме ответа: сервер сериализует, клиент разбирает ... ok
+tests.TestServer.test_serve ... ok</code>
