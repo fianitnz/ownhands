@@ -32,6 +32,8 @@ class MockClient(object):
 
 class TestHTTP(object):
     def test_request(self):
+        """Тестирование в режиме запроса: клиент сериализует, сервер разбирает"""
+
         eq_(encode_http(('GET', '/', 'HTTP/1.0'), user_agent="test/shmest"),
             'GET / HTTP/1.0\r\nUser-Agent: test/shmest\r\n')
 
@@ -42,10 +44,11 @@ class TestHTTP(object):
             (['POST', '/', 'HTTP/1.0'], {'USER-AGENT': 'test/shmest'}, 'post=body'))
 
     def test_response(self):
+        """Тестирование в режиме ответа: сервер сериализует, клиент разбирает"""
         data = 'HTTP/1.0 200 OK\r\nSpam: eggs\r\nTest-Me: please\r\n\r\nHellow, orld!\n'
 
         eq_(data, encode_http(('HTTP/1.0', '200', 'OK'), 'Hellow, orld!\n', test_me='please', spam="eggs"))
-        
+
         reply, headers, body = parse_http(data)
         eq_(reply, ['HTTP/1.0', '200', 'OK'])
         eq_(headers, {'TEST-ME': 'please', 'SPAM': 'eggs'})
