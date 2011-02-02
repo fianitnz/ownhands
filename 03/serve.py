@@ -70,7 +70,7 @@ class HTTPServer(object):
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.bind(('', 8000))
         sock.listen(50)
-        
+
         while True:
             conn, addr = sock.accept()
             self.on_connect(conn, addr)
