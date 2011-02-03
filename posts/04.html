@@ -1,0 +1,101 @@
+Переходим к более практической части. Хардкодом побаловались, далее по <a href="http://welinux.ru/post/5043/#plan">плану</a> идёт раздача файлов.
+
+Я пока смутно представляю какой должна быть реализация, но зато примерно знаю как можно проверить её правильность. Поэтому эти знания мы сейчас выразим в виде теста, к несуществующему пока коду. Такой подход называется <a href="http://ru.wikipedia.org/wiki/%D0%A0%D0%B0%D0%B7%D1%80%D0%B0%D0%B1%D0%BE%D1%82%D0%BA%D0%B0_%D1%87%D0%B5%D1%80%D0%B5%D0%B7_%D1%82%D0%B5%D1%81%D1%82%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5">Test-driven Development</a> или TDD. Тоесть мы сначала строим измеритель выхлопа, а потом уже на другом конце собираем карбюратор, соответствующий заданым параметрам (= Контринтуитивный манёвр, но частенько помогает определиться с API ещё до написания кода, который потом, во время изменения задачи придётся переписывать. А зачем делать двойную работу?
+
+Обработчики являются как бы плагинами к серверу, он от них никак не зависит, и поэтому должны лежать в отдельном модуле (handlers.py).
+
+<code lang='python'>class TestHandlers(object):
+    def setup(self):
+        self.server = HTTPServer()
+        self.client = MockClient(self.server)
+
+    def test_static(self):
+        """Раздача файлов с диска"""
+
+        self.server.register(lambda r: True, serve_static) # обслуживать все запросы как файл-сервер
+
+        eq_('404', self.client('/give-me-nice-404')[0][1])
+
+        reply, headers, body = self.client('/handlers.py') # файл из каталога сервера
+        data = open('handlers.py').read()                  # загружаем тот же файл вручную
+        eq_(body, data)                                    # проверяем содержимое
+        eq_(int(headers['CONTENT-LENGTH']), len(data))     # и заголовок с длиной, которую сервер должен нам посчитать</code>
+
+Функцию serve_static надо будет импортировать в начале тестов, а в handlers.py сделать заглушку:
+<code lang='python'>def serve_static(request):
+    request.reply(body="your file %s is being downloaded. wait 1 minute for a link or send SMS to numer 100500")</code>
+
+Тесты начнут дружно валиться, но теперь понятно что должно быть внутри функции:
+<code lang='python'>def serve_static(request):
+    try:
+        data = open(request.url[1:]).read()  # отрезаем начальный / из адреса и считываем файлы
+    except IOError as err:                   # если что-то не получилось, ловим ошибку
+        if err.errno == 2:                   # ничего особенного, просто нет такого файла
+            return request.reply('404', 'Not found', '%s: not found' % request.url)
+        raise                                # всё остальное - не наше дело
+    request.reply(body=data, content_length=len(data))</code>
+
+Теперь всё проходит. Теперь можно сделать «однострочный веб сервер» для раздачи файлов из текущего каталога в баше, который можно вызывать через `python -m serve`. Пока оно не установлено в пути python из любого каталога конечно не прокатит, но из возле самого сервера работать вполне будет.
+<code lang='python'>if __name__ == '__main__':
+    server = HTTPServer()
+    from handlers import serve_static
+    server.register(lambda _: True, serve_static)
+    server.serve()</code>
+
+Запускаем, пробуем:
+<code lang='bash'>curl http://localhost:8000/handlers.py
+def serve_static(request):
+    try:
+...</code>
+
+Работает. Пробуем дальше:
+<code lang='bash'>curl http://localhost:8000/../../../../../../../../../../../etc/passwd
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/bin/sh
+bin:x:2:2:bin:/bin:/bin/sh
+sys:x:3:3:sys:/dev:/bin/sh
+...</code>
+
+Ой! К счастью сервер запущен не от рута и /etc/shadow в безопасности. Но сервер при этом жёстко крашнется:
+<code lang='bash'>GET /../../../../../../../../../../../etc/shadow {'HOST': 'localhost:8000', 'ACCEPT': '*/*', 'USER-AGENT': 'curl/7.21.0 (x86_64-pc-linux-gnu) libcurl/7.21.0 OpenSSL/0.9.8o zlib/1.2.3.4 libidn/1.18'}
+Traceback (most recent call last):
+...
+  File "handlers.py", line 5, in serve_static
+    data = open(request.url[1:]).read()
+IOError: [Errno 13] Permission denied: '../../../../../../../../../../../etc/shadow'</code>
+
+Сразу допишем в <b>test_handlers</b> вредный тест, который будет рушить «сервер» в комфортной обстановке:
+<code lang='python'>self.server.register(lambda r: r.url == '/crash/me/', lambda r: no_you)
+eq_('500', self.client('/crash/me/')[0][1])</code>
+Тесты начали фэйлиться с "NameError: global name 'no_you' is not defined". Замечательно, то что нужно.
+
+В каждом хэндлере всех ошибок не отловишь, да и полагаться на их будущих авторов тоже не стоит. «Хочешь чтобы было хорошо — сделай это сам!». Где у нас есть место, в котором можно раз и навсегда защитить сервер от крашей по причине ошибок хэндлеров? Они вызываются из диспетчера <b>on_request</b>, пристегнём его try-мнями безопасности:
+<code lang='python'>try:  # всё что далее, под защитой
+    for pattern, handler in self.handlers:
+        if pattern(request):
+            handler(request)
+            return True
+except Exception as err:                                              # ловим все ошибки
+    request.reply('500', 'Infernal server error', 'Ай нанэ-нанэ...')  # и сообщаем в ответе
+    return False  # обязательно заканчиваем выполнение после request.reply чтобы не слать уже в закрытый сокет
+# соединение закрыто, сервер продолжает свою работу</code>
+Конечно, это не защитит от всяких фатальных ошибок типа вызывающих core dump, но уже что-то. Тесты теперь ловят свой законный «груз 500», но человек, заглянувший браузером останется в непонятках и будет зол. Особенно если это сам разработчик в поисках проблемы. Питон позволяет не просто отлавливать код и сообщение ошибки, но и ситуацию, в которой она возникла. А заполучить это нам поможет штатный модуль <b>traceback</b>.
+
+Сделаем более детальный тест:
+<code lang='python'>request, headers, body = self.client('/crash/me/')
+eq_(request[1], '500')
+assert 'NameError' in body, body
+</code>
+
+Выражение assert это способ языка проверить очень-важное-условие. <b>assert False</b> — всегда будет вызывать исключение AssertionError. А чтобы сразу было видно, что не понравилось условию, вторым «аргументом» assert идёт тело ответа. Прямо сейчас нам оттуда просто выражают сожаление, но ничего конкретного не сообщают.
+
+Немного изменим обработку ошибки:
+<code lang='python'>request.reply('500', 'Infernal server error', traceback.format_exc())</code>
+
+curl стал показывать трейсбек и ошибку, что значительно облегчит написание и отладку обработчиков:
+<code lang='bash'>...
+  File "handlers.py", line 5, in serve_static
+    data = open(request.url[1:]).read()
+IOError: [Errno 13] Permission denied: '../../../../../../../../../../../etc/shadow'</code>
+
+

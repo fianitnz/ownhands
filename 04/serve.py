@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import socket
+import traceback
 from datetime import datetime
 
 def parse_http(data):
@@ -84,10 +85,14 @@ class HTTPServer(object):
         """Обработка запроса"""
         print request
 
-        for pattern, handler in self.handlers:
-            if pattern(request):
-                handler(request)
-                return True
+        try:
+            for pattern, handler in self.handlers:
+                if pattern(request):
+                    handler(request)
+                    return True
+        except Exception as err:
+            request.reply('500', 'Infernal server error', traceback.format_exc())
+            return False
 
         # никто не взялся ответить
         request.reply('404', 'Not found', 'Письмо самурай получил\nТают следы на песке\nСтраница не найдена')

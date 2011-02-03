@@ -79,6 +79,12 @@ class TestServer(object):
         eq_(reply[1], '200')
         eq_(body, 'any url')
 
+        self.server.register(lambda r: r.url == '/crash/me/', lambda r: no_you)
+        request, headers, body = self.client('/crash/me/')
+        eq_(request[1], '500')
+        assert 'NameError' in body, body
+
+
 class TestHandlers(object):
     def setup(self):
         self.server = HTTPServer()
