@@ -102,3 +102,5 @@ class TestHandlers(object):
         eq_(body, data)
         eq_(int(headers['CONTENT-LENGTH']), len(data))
 
+        eq_('404', self.client('/../../../../../../../../../../../etc/passwd')[0][1])
+

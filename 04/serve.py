@@ -3,6 +3,9 @@ import socket
 import traceback
 from datetime import datetime
 
+class HTTPError(Exception):
+    pass
+
 def parse_http(data):
     lines = data.split('\r\n')
     query = lines[0].split(' ', 2)
@@ -90,6 +93,14 @@ class HTTPServer(object):
                 if pattern(request):
                     handler(request)
                     return True
+        except HTTPError as error:
+            code = error.args[0]
+            reply = {
+                404: 'Not found',
+                403: 'Permission denied',
+            }[code]
+            request.reply(str(code), reply, "%s: %s" % (reply, request.url))
+            return False
         except Exception as err:
             request.reply('500', 'Infernal server error', traceback.format_exc())
             return False

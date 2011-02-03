@@ -1,15 +1,24 @@
 # -*- coding: utf-8 -*-
 
+from os.path import relpath
+
+from serve import HTTPError
+
 def serve_static(request):
+    path = request.url[1:]
+    if relpath(path).startswith('..'):
+        raise HTTPError(404)
+
     try:
-        data = open(request.url[1:]).read()
+        data = open(path).read()
     except IOError as err:
         if err.errno == 2:
-            return request.reply('404', 'Not found', '%s: not found' % request.url)
+            raise HTTPError(404)  # not found
         if err.errno == 13:
-            return request.reply('403', 'Permission denied', '%s: permission denied' % request.url)
+            raise HTTPError(403)  # no access
         if err.errno == 21:
-            return request.reply('403', 'Directory listing denied', '%s: directory listing denied' % request.url)
+            raise HTTPError(403)  # is a directory
         raise
+
     request.reply(body=data, content_length=len(data))
 
