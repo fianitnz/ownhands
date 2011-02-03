@@ -97,5 +97,6 @@ class HTTPServer(object):
 
 if __name__ == '__main__':
     server = HTTPServer()
+    from handlers import serve_static
+    server.register(lambda _: True, serve_static)
     server.serve()
-
