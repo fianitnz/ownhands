@@ -79,3 +79,20 @@ class TestServer(object):
         eq_(reply[1], '200')
         eq_(body, 'any url')
 
+class TestHandlers(object):
+    def setup(self):
+        self.server = HTTPServer()
+        self.client = MockClient(self.server)
+
+    def test_static(self):
+        """Раздача файлов с диска"""
+
+        self.server.register(lambda r: True, serve_static) # обслуживать все запросы как файл-сервер
+
+        eq_('404', self.client('/give-me-nice-404')[0][1])
+
+        reply, headers, body = self.client('/handlers.py') # файл из каталога сервера
+        data = open('handlers.py').read()
+        eq_(body, data)
+        eq_(int(headers['CONTENT-LENGTH']), len(data))
+
