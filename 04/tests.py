@@ -93,11 +93,12 @@ class TestHandlers(object):
     def test_static(self):
         """Раздача файлов с диска"""
 
-        self.server.register(lambda r: True, serve_static) # обслуживать все запросы как файл-сервер
+        self.server.register(*serve_static('/', '.')) # обслуживать все запросы как файл-сервер
 
         eq_('404', self.client('/give-me-nice-404')[0][1])
 
         reply, headers, body = self.client('/handlers.py') # файл из каталога сервера
+        eq_('200', reply[1])
         data = open('handlers.py').read()
         eq_(body, data)
         eq_(int(headers['CONTENT-LENGTH']), len(data))
