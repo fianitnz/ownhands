@@ -4,14 +4,14 @@ from os.path import relpath
 
 from serve import HTTPError
 
-def serve_static(url, path):
+def serve_static(url, root):
     cut = len(url)
 
     def pattern(request):
         return request.url.startswith(url)
 
     def handler(request):
-        path = "%s/%s" % (path, request.url[cut:])
+        path = "%s/%s" % (root, request.url[cut:])
 
         if relpath(path).startswith('..'):
             raise HTTPError(404)
