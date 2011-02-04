@@ -112,7 +112,20 @@ class HTTPServer(object):
         self.handlers.append((pattern, handler))
 
 if __name__ == '__main__':
-    server = HTTPServer()
     from handlers import serve_static
-    server.register(lambda _: True, serve_static)
+
+    port, root = 8000, '.'
+
+    try:
+        import argparse
+        parser = argparse.ArgumentParser()
+        parser.add_argument('--port', nargs='?', type=int, default=8000)
+        parser.add_argument('--root', nargs='?', type=str, default='.')
+        options = parser.parse_args()
+        port, root = options.port, options.root
+    except ImportError:
+        pass
+
+    server = HTTPServer(port=port)
+    server.register(*serve_static('/', root))
     server.serve()
