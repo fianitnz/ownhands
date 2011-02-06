@@ -119,8 +119,8 @@ if __name__ == '__main__':
     try:
         import argparse
         parser = argparse.ArgumentParser()
-        parser.add_argument('--port', nargs='?', type=int, default=8000)
-        parser.add_argument('--root', nargs='?', type=str, default='.')
+        parser.add_argument('--port', nargs='?', type=int, default=port)
+        parser.add_argument('--root', nargs='?', type=str, default=root)
         options = parser.parse_args()
         port, root = options.port, options.root
     except ImportError:
