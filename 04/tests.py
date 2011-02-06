@@ -103,5 +103,9 @@ class TestHandlers(object):
         eq_(body, data)
         eq_(int(headers['CONTENT-LENGTH']), len(data))
 
+        reply, headers, body = self.client('/handlers.py', if_modified_since=headers['LAST-MODIFIED'])
+        eq_(reply, ['HTTP/1.0', '304', 'Not modified'])
+        eq_(body, '')
+
         eq_('404', self.client('/../../../../../../../../../../../etc/passwd')[0][1])
 
