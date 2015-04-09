@@ -1,0 +1,20 @@
+body {
+    width: 46em;
+    margin: 0 auto 0 auto;
+    font-size: 1em;
+    text-align: justify;
+
+}
+
+pre:lang(python) {
+    border: 0.1em solid #c3c3c3;
+    border-left: 0.5em solid #ff9400;
+    padding-left: 1em;
+    font-size: 0.95em;
+    background: rgb(255, 255, 136);
+    overflow: auto;
+    color: rgb(255, 255, 255, 1);
+    font-family: monospace;
+    padding: 0.5ex 1em 0.5ex 1em;
+}
+

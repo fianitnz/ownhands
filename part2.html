@@ -1,0 +1,207 @@
+<!DOCTYPE html>
+<html lang="ru-RU">
+    <head>
+        <meta charset="UTF-8">
+        <title>Ownhands by wiz</title>
+        <link rel="stylesheet" type="text/css" href="style.css">
+    </head>
+    <body>
+        <h2 class="project-name">Ownhands</h2>
+        <h4 class="project-tagline">Exported from <a href="http://code.google.com/p/ownhands">http://code.google.com/p/ownhands</a></h4>
+        <h3><a href="http://welinux.ru/user/wiz/">wiz</a></h3>
+        <h1>Серия постов для welinux</h1>
+        <a href="index.html">Оглавление</a><br>
+        <a href="part1.html">Python — Веб-сервер своими руками. Часть 1</a><br>
+        <a href="part2.html">Python — Веб-сервер своими руками. Часть 2 — наводим порядок</a><br>
+        <a href="part3.html">Python — Веб-сервер своими руками. Часть 3 — фиксим фичи, добавляем баги</a><br>
+        <a href="part4.html">Python — Веб-сервер своими руками. Часть 4 — раздача файлов</a>
+        <p><a href="https://github.com/fianitnz/ownhands" class="btn">View on GitHub</a>&nbsp<a href="https://github.com/fianitnz/ownhands/zipball/master" class="btn">Download.zip</a>&nbsp<a href="https://github.com/fianitnz/ownhands/tarball/master" class="btn">Download.tar.gz</a></p>
+        <p>01.02.2011 17:40 from: <a href="http://welinux.ru/post/5047/">http://welinux.ru/post/5047/</a></p>
+        <h3>Python — Веб-сервер своими руками. Часть 2 — наводим порядок</h3>
+        <p>Один модуль, в котором лежит всё подряд это нормально для мини-серверков, которые просто делают одну функцию и не собираются становиться более универсальными. Используя код из <a href="part1.html">первой части</a> любой теперь может выполнять простейшие операции через свой «веб интерфейс», но даже это скоро станет очень тяжело поддерживать.</p>
+        <p>Поэтому сейчас мы поделим сервер на части и упакуем всё в коробку с бантиком, чтобы модуль можно было использовать в своих целях, не изменяя код самого сервера.</p>
+        <p>Для начала, применим принцип <a href="http://ru.wikipedia.org/wiki/%D0%98%D0%BD%D0%BA%D0%B0%D0%BF%D1%81%D1%83%D0%BB%D1%8F%D1%86%D0%B8%D1%8F_(%D0%BF%D1%80%D0%BE%D0%B3%D1%80%D0%B0%D0%BC%D0%BC%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5)">инкапсуляции</a> и объединим всё барахло сервера и его код в один класс:</p>
+        <pre lang='python'><code>
+class HTTPServer(object):
+    def __init__(self, host='', port=8000):
+        """Распихиваем по карманам аргументы для старта"""
+        self.host = host
+        self.port = port</code></pre>
+        <p>И заодно допишем к модулю специальный режим, чтобы он мог запускаться как скрипт и делать что-нибудь (условно) полезное:</p>
+        <pre lang='python'><code>
+if __name__ == '__main__':
+    server = HTTPServer()
+    server.serve()</code></pre>
+        <p>Этот код будет выполняться только если модуль будет запущен напрямую (python s02.py) или через специальный режим для запуска модулей, лежащих где-то в недрах библиотеки (python -m s02).</p>
+        <p>Если(когда) вы столкнётесь с ошибкой «Address already in use» это значит, что ОС ещё не освободила адрес и ждёт завершения каких-то своих операций. Такое бывает если сервер обслуживал подключения, а потом крашнулся. В таком случае надо просто подождать несколько секунд.</p>
+        <p>Теперь можно втащить сюда и рабочий код сервера.</p>
+        <pre lang='python'><code>
+def serve(self):
+    """Цикл ожидания входящих соединений"""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.bind((self.host, self.port))  # параметры берём из нашего «контейнера», в который их положили при старте.
+    sock.listen(50)                    # количество соединений в очереди, перед тем, как ОС откажется их принимать
+
+    while True:
+        conn, addr = sock.accept()     # есть контакт! следующая фаза — разбор чего же там пришло интересного
+        self.on_connect(conn, addr)</code></pre>
+        <p><b>self</b> — обязательный параметр для всех <a href="http://ru.wikipedia.org/wiki/%D0%9C%D0%B5%D1%82%D0%BE%D0%B4_(%D1%8F%D0%B7%D1%8B%D0%BA%D0%B8_%D0%BF%D1%80%D0%BE%D0%B3%D1%80%D0%B0%D0%BC%D0%BC%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D1%8F)">методов</a> класса через который передаётся конкретный его <a href="http://ru.wikipedia.org/wiki/%D0%AD%D0%BA%D0%B7%D0%B5%D0%BC%D0%BF%D0%BB%D1%8F%D1%80_%D0%BA%D0%BB%D0%B0%D1%81%D1%81%D0%B0">экземпляр</a>.</p>
+        <p>Код делится на несколько стадий чтобы была возможность их <a href="http://ru.wikipedia.org/wiki/%D0%9F%D0%BE%D0%BB%D0%B8%D0%BC%D0%BE%D1%80%D1%84%D0%B8%D0%B7%D0%BC_%D0%B2_%D1%8F%D0%B7%D1%8B%D0%BA%D0%B0%D1%85_%D0%BF%D1%80%D0%BE%D0%B3%D1%80%D0%B0%D0%BC%D0%BC%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D1%8F">заменять</a> по требованию или вызывать по частям, например для <a href="http://ru.wikipedia.org/wiki/%D0%9C%D0%BE%D0%B4%D1%83%D0%BB%D1%8C%D0%BD%D0%BE%D0%B5_%D1%82%D0%B5%D1%81%D1%82%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5">тестирования</a>.</p>
+        <pre lang='python'><code>
+def on_connect(self, conn, addr):
+    """Соединение установлено, вычитываем запрос"""
+    data = conn.recv(1024).split('\r\n')
+    method, url, proto = data[0].split(' ', 2)
+
+    headers = {}
+    for pos, line in enumerate(data[1:]):
+        if not line.strip():
+            break
+        key, value = line.split(': ', 1)
+        headers[key.upper()] = value
+
+    body = '\r\n'.join(data[pos+2:])
+    self.on_request(method, url, headers, body, conn)</code></pre>
+        <p>Всё как и раньше, просто это один из логических участков работы с запросом и потенциально может быть переопределён самыми разными способами. Обратите внимание, что не смотря на то, что self передаётся, туда ничего не складывается — никаких соединений, никаких заголовков и всего такого. Оно просто передаётся следующему «работнику конвеера». Причин тут сразу несколько.</p>
+        <p>Во-первых, это нарушает принципиальное устройство класса: он называется «сервер», а прицеплять туда детали каждого конкретного соединения получается ни к селу ни к городу.</p>
+        <p>Во-вторых, сервер у нас один, а соединений много. Если обслуживаются сразу несколько соединений, то они будут постоянно перезаписывать разные участки данных друг друга. Это FAIL.</p>
+        <p>И, в любом случае, как подсказывает нам практика <a href="http://ru.wikipedia.org/wiki/%D0%A4%D1%83%D0%BD%D0%BA%D1%86%D0%B8%D0%BE%D0%BD%D0%B0%D0%BB%D1%8C%D0%BD%D0%BE%D0%B5_%D0%BF%D1%80%D0%BE%D0%B3%D1%80%D0%B0%D0%BC%D0%BC%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5">функционального программирования</a>, чем меньше код создаёт <a href="http://ru.wikipedia.org/wiki/%D0%9F%D0%BE%D0%B1%D0%BE%D1%87%D0%BD%D1%8B%D0%B9_%D1%8D%D1%84%D1%84%D0%B5%D0%BA%D1%82_(%D0%BF%D1%80%D0%BE%D0%B3%D1%80%D0%B0%D0%BC%D0%BC%D0%B8%D1%80%D0%BE%D0%B2%D0%B0%D0%BD%D0%B8%D0%B5)">побочных эффектов</a> во время своей работы, тем меньше вероятность возникновения и распространения ошибок.</p>
+        <pre lang='python'><code>
+def on_request(self, method, url, headers, body, conn):
+    """Обработка запроса"""
+    print method, url, repr(body)
+
+    conn.send("HTTP/1.0 200 OK\r\n")
+    conn.send("Server: OwnHands/0.1\r\n")
+    conn.send("Content-Type: text/plain\r\n")
+    conn.send("\r\n")
+    conn.send("Hi there!")
+    conn.close()</code></pre>
+        <p>Тут совершенно ничего фантастического пока что нет. Но скоро будет (:</p>
+        <p>Что же у нас на данный момент получилось? Сервер на любое соединение, на любой запрос без обработки просто по-быстрому отдаёт результат. Интересно, кстати, насколько быстро? Давайте проверим. Воспользуемся утилитой ab из apache-utils:</p>
+        <pre lang='python'><code lang='bash'>
+ab -n 5000 'http://localhost:8000/hellow/orld/?whatever=stuff&spam=eggs'</code></pre>
+        <p>На нормальном десктопе 5к запросов пролетает за пару секунд даже на таком «медленном» языке, как python. Из отчёта ab нам будут интересны несколько строк:</p>
+        <code>Requests per second:    4228.88 [#/sec] (mean)</code>
+        <p>Количество запросов в секунду, которое сервер может через себя пропустить. Если подавать на него меньшее количество, то он будет часть времени простаивать, а если больше - то запросы будут скапливаться в очереди в конце концов отваливаться с ошибкой, о чём станет извествно из соответствующих строк отчёта:</p>
+        <pre lang='python'><code>
+Complete requests:      5000
+Failed requests:        0</code></pre>
+        <p>Ещё хорошим показателем является то, что после окончаний пытаний сервера бенчмарком он остаётся работать и не вылетает на пол пути (=</p>
+        <p>А как оно будет себя если валить на него сразу много одновременных соединений? Мы ведь никакой явной параллелизации не делали. Давайте посмотрим:</p>
+        <pre lang='python'><code>
+ab -c 10 -n 5000 'http://localhost:8000/hellow/orld/?whatever=stuff&spam=eggs'
+...
+Complete requests:      5000
+Failed requests:        0
+...
+Requests per second:    11333.29 [#/sec] (mean)</code></pre>
+        <p>Опаньки! При десяти (опция -c 10) одновременных соединений он выдаёт даже больше «попугаев» - аж в два раза. Это связано с тем, что ОС действует независимо от сервера. И пока сервер там делает свои дела, она в ядре обрабатывает <a href="http://ru.wikipedia.org/wiki/TCP#.D0.A3.D1.81.D1.82.D0.B0.D0.BD.D0.BE.D0.B2.D0.BA.D0.B0_.D1.81.D0.BE.D0.B5.D0.B4.D0.B8.D0.BD.D0.B5.D0.BD.D0.B8.D1.8F">установку соединений</a> и все эти штучки на более низких уровнях стека протоколов. Готовые к употреблению соединения ОС укладывает в очередь, размер которой задаётся при переводе сокета в режим сервера: sock.listen(50)</p>
+        <p>Впрочем даже указав -c 1000 мне не удалось завалить свой сервер и ни один запрос небыл потерян :3</p>
+        <p>Запомним эти цифры, это базовый уровень скорости нашего сервера. В дальнейшем он будет работать всё тормознее и тормознее (8</p>
+        <p>(<a href="https://code.google.com/p/ownhands/source/browse/s02.py?spec=svn4a5967f3e7244d73a9319b0d793fb37d8cad98d9&r=4a5967f3e7244d73a9319b0d793fb37d8cad98d9">Полный код</a> после упаковки в класс.)</p>
+        <p>А как быстро проверить, что оно вообще работает и будет работать после внесения дальнейших изменений? Для этого мы используем модульное тестирование с помощью <a href="http://code.google.com/p/python-nose/">nose</a>, который надо `pip install`.</p>
+        <p>Сами тесты будут лежать в tests.py (так то!) и представлять собой несколько классов, содержащих код, проверяющий работоспособность собственно рабочего кода.</p>
+        <p>Проверяем:</p>
+        <pre lang='python'><code>
+from s02 import HTTPServer
+
+class TestHttp(object):
+    def test_serve(self):
+        HTTPServer().serve()
+        urlopen("http://localhost:8000/test/me/")</code></pre>
+        <p>Oops! Сервер начинает слушать порт и пока его вечный цикл не завершится, код дальше не пойдёт. Халявы не вышло...</p>
+        <p>Давайте внимательно посмотрим что делает метод serve. Он создаёт сокет и ждёт... Ждёт он пока появится доступное соединение, которое он передаст дальше. Больше ничего полезного или хотя бы интересного тут не происходит. И по большому счёту, никакого нашего кода тут нет — все эти операции на сокетах делаются стандартной библиотекой питона, которая протестирована вдоль и поперёк. Попробуем обойтись без этого.<p>
+        <code>def on_connect(self, conn, addr):</code>
+        <p>Судя по <a href="http://ru.wikipedia.org/w/index.php?title=%D0%A1%D0%B8%D0%B3%D0%BD%D0%B0%D1%82%D1%83%D1%80%D0%B0_%D1%84%D1%83%D0%BD%D0%BA%D1%86%D0%B8%D0%B8">сигнатуре</a>, метод работы с соединением принимает что-то и ещё кое-что. Тоесть ему глубого фиолетово что там будут передавать. Давайте этим и воспользуемся.</p>
+        <pre lang='python'><code>
+def test_serve(self):
+        server = HTTPServer()
+        server.on_connect("i am a socket", None)</code></pre>
+        <p>Да, это полная фигня и не должно работать в принципе. Но запустив тесты (nosetests tests.py) мы хотя бы узнаем что именно от нас требуется предоставить в качестве «сокета».</p>
+        <pre lang='python'><code>
+data = conn.recv(1024).split('\r\n')
+AttributeError: 'str' object has no attribute 'recv'</code></pre>
+        <p>Как минимум, объект должен иметь метод «recv», который получает размер буфера и возвращает строку (split это метод объектов-строк). Пробежися сразу по коду в поисках других обращений к этому conn. Это встречается аж в самом конце последнего метода, но сделаем всё сразу:</p>
+        <pre lang='python'><code>
+conn.send("Hi there!\n")
+conn.close()</code></pre>
+        <p>Итак, нам понадобится сделать объект, который будет эмулировать соединение и обладать тремя методами: recv, send и close. Такая методика называется «Mock Objects», «липовые объекты».</p>
+        <pre lang='python'><code>
+class MockConnection(object):
+    def __init__(self, data=''):
+        """Создаём буферы для приёма и передачи"""
+        self.read = data
+        self.sent = ''
+
+    def recv(self, buf_size=None):
+        """HTTP читает всё сразу и один раз, поэтому на буфер пофиг"""
+        return self.read
+
+    def send(self, data):
+        """Просто накапливаем отправленое"""
+        self.sent += data
+
+    def close(self):
+        """Закрывать нечего, просто заглушка"""
+        pass</code></pre>
+        <p>Такой-вот примитивчик. Для тестов нам хватит, а там дальше что-нибудь придумаем...</p>
+        <p>Закорачиваем наш сервер на тестовое «соединение» и смотрим что получится:</p>
+        <pre lang='python'><code>
+def test_serve(self):
+        server = HTTPServer()
+        conn = MockConnection()  # типа стартовали и подключились
+        server.on_connect(conn, None)</code></pre>
+        <p>Получается, совсем не внезапно, а вполне ожидаемо, ошибка — ведь мы ещё ничего не отправили по соединению:</p>
+        <pre lang='python'><code>
+method, url, proto = data[0].split(' ', 2)
+ValueError: need more than 1 value to unpack</code></pre>
+        <p>Пустую строку разделили и получили список из одной пустой строки (можете проверить в интерпретаторе: ''.split('\r\n')). Там, где по протоколу HTTP идёт 3 параметра, split вернул опять один и поломался код распаковки списка по переменным, который очень строго подсчитывает сколько куда должно попасть значений.</p>
+        <p>Давайте теперь подсунем туда реальный запрос от настоящего клиента. Для этого есть полезная UNIX-утилита netcat:</p>
+        <pre lang='python'><code lang='bash'>
+$ netcat -l 8000
+GET /hellow/orld/ HTTP/1.0
+User-Agent: Wget/1.12 (linux-gnu)
+Accept: */*
+Host: localhost:8000
+Connection: Keep-Alive</code></pre>
+        <p>То, что надо! Теперь мы знаем как представиться клиентом.</p>
+        <p>Но каждый раз вручную составлять все эти строки будет очень неудобно, поэтому сразу же напишем «липовый клиент», который сам «установит соединение с сервером» и вызовет его обработчик:</p>
+        <pre lang='python'><code>
+class MockClient(object):
+    def __init__(self, server):
+        self.server = server
+
+    def __call__(self, url, method="GET", body='', **headers):
+        # Первая строка - запрос
+        request = "%s %s HTTP/1.0" % (method, url)
+
+        # Дефолтные заголовки
+        headers.setdefault('host', 'localhost')
+        headers.setdefault('user_agent', 'MockClient/0.1')
+        headers.setdefault('connection', 'close')
+
+        # Приводим заголовки к красивому Http-Виду
+        headers = "\r\n".join("%s: %s" %
+            ("-".join(part.title() for part in key.split('_')), value)
+            for key, value in sorted(headers.iteritems()))
+
+        # Собираем всё в кучу^W HTTP-запрос
+        data = "\r\n".join((request, headers, ''))
+        data += body
+
+        # Заворачиваем в соединение и пускаем в обработку
+        return self.server.on_connect(MockConnection(data), None)</code></pre>
+        <p><quote>Лично я стараюсь сразу делать код, удобный в использовании. Кому-то не нравится магия-шмагия, а мне сильно приятней писать среди питонского кода в питонском же стиле. Поэтому заголовки передаются как именованые аргументы метода и кодом преобразовываются из «some_header_name="value"» в каноничныйъ «Some-Header-Name: value». Можно было бы передавать туда сразу готовый словарь или даже список, но лично мне такое близкое общение с чужими протоколами не по нраву.</quote><p/>
+        <p>Теперь написание тестов будет попроще.</p>
+        <pre lang='python'><code>
+server = HTTPServer()
+client = MockClient(server)
+client('/hellow/orld/')</code></pre>
+        <p>Запускаем тесты, оно работает!</p>
+        <pre lang='python'><code lang='bash'>
+Ran 1 test in 0.001s
+
+OK</code></pre>
+        <p>Ну... Во всяком случае не вылетает. Но что конкретно работает? Об этом — в следующей части, а то и так уже несколько человек до сюда не дочитало (:</p>
+        <p>(Полный код <a href="https://code.google.com/p/ownhands/source/browse/02/tests.py">тестов</a> и <a href="https://code.google.com/p/ownhands/source/browse/02/s02.py">сервера</a>)</p>
