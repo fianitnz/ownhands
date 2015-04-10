@@ -7,14 +7,25 @@ body {
 }
 
 pre:lang(python) {
-    border: 0.1em solid #c3c3c3;
-    border-left: 0.5em solid #ff9400;
+    border: 0.2ex solid #006699;
+    border-left: 0.5em solid #006699;
     padding-left: 1em;
     font-size: 0.95em;
-    background: rgb(255, 255, 136);
+    background: #FFFF99;
     overflow: auto;
-    color: rgb(255, 255, 255, 1);
+    color: #000000;
     font-family: monospace;
     padding: 0.5ex 1em 0.5ex 1em;
 }
 
+pre:lang(bash) {
+    border: 0.2ex solid #009900;
+    border-left: 0.5em solid #009900;
+    padding-left: 1em;
+    font-size: 0.95em;
+    background: #000000;
+    overflow: auto;
+    color: #ffffff;
+    font-family: monospace;
+    padding: 0.5ex 1em 0.5ex 1em;
+}
